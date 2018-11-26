@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+
+<head>
+  <title>whatever</title>
+</head>
+
+<body>
+
+  <p id="story"></p>
+
+  <script type="text/javascript">
+
+    const source = new EventSource("/status");
+    source.addEventListener("id", e => {
+        console.log(e.data);
+    });
+    source.onmessage = e => {
+        console.log(e);
+    }
+
+  </script>
+
+</body>
