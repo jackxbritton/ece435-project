@@ -6,16 +6,59 @@
 
 <body>
 
+  <h3>story</h3>
   <p id="story"></p>
+
+  <h3>words</h3>
+  <p id="words"></p>
+
+  <h3>players</h3>
+  <p id="players"></p>
+
+  <h3>you</h3>
+  <p id="id"></p>
+
+  <input type="number" id="submission" value="0">
+  <input type="button" onclick="submit()">
 
   <script type="text/javascript">
 
-    const source = new EventSource("/status");
-    source.addEventListener("id", e => {
-        console.log(e.data);
-    });
-    source.onmessage = e => {
-        console.log(e);
+    let id, words;
+
+    let ws = new WebSocket('ws://localhost:8080/status');
+    ws.onerror = e => console.log(e);
+    ws.onopen = () => console.log('open');
+    ws.onclose = () => console.log('close');
+    ws.onmessage = e => {
+
+      const msg = JSON.parse(e.data);
+      console.log(msg);
+
+      if (msg.id !== undefined) {
+        id = msg.id;
+        document.getElementById('id').innerHTML = 'ID=' + id;
+      }
+
+      if (msg.players !== undefined) {
+        document.getElementById('players').innerHTML = msg.players.map(x => x.id).join(', ');
+      }
+
+      if (msg.words !== undefined) {
+        words = msg.words;
+        document.getElementById('words').innerHTML = msg.words.map(x => x.word).join(', ');
+      }
+
+      if (msg.story !== undefined) {
+        document.getElementById('story').innerHTML = msg.story;
+      }
+
+    }
+
+    function submit() {
+      const id = parseInt(document.getElementById("submission").value);
+      if (!Number.isInteger(id)) return;
+      if (!words.map(x => x.id).includes(id)) return;
+      ws.send(JSON.stringify({ id: id }));
     }
 
   </script>

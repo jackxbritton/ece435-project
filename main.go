@@ -5,6 +5,10 @@ import (
 )
 
 func main() {
-	s := newServer(4)
-	log.Fatal(s.Start())
+	s, err := NewServer(4)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	log.Println(s.Start())
 }
