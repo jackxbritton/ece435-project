@@ -6,24 +6,16 @@
 
 <body>
 
-  <h3>story</h3>
   <p id="story"></p>
 
   <h3>words</h3>
-  <p id="words"></p>
+  <div id="words"></div>
 
-  <h3>players</h3>
-  <p id="players"></p>
-
-  <h3>you</h3>
-  <p id="id"></p>
-
-  <input type="number" id="submission" value="0">
-  <input type="button" onclick="submit()">
+  <p id="turn"></p>
 
   <script type="text/javascript">
 
-    let id, words;
+    let id;
 
     let ws = new WebSocket('ws://localhost:8080/status');
     ws.onerror = e => console.log(e);
@@ -36,29 +28,30 @@
 
       if (msg.id !== undefined) {
         id = msg.id;
-        document.getElementById('id').innerHTML = 'ID=' + id;
-      }
-
-      if (msg.players !== undefined) {
-        document.getElementById('players').innerHTML = msg.players.map(x => x.id).join(', ');
       }
 
       if (msg.words !== undefined) {
-        words = msg.words;
-        document.getElementById('words').innerHTML = msg.words.map(x => x.word).join(', ');
+        let wordsDiv = document.getElementById('words');
+        // Wipe its children.
+        while (wordsDiv.firstChild) wordsDiv.removeChild(wordsDiv.firstChild);
+        // Append each of the words.
+        msg.words.forEach(word => {
+          let node = document.createElement('P');
+          let text = document.createTextNode(word.word);
+          node.appendChild(text);
+          node.onclick = () => ws.send(JSON.stringify({ id: word.id }));
+          wordsDiv.appendChild(node);
+        });
       }
 
       if (msg.story !== undefined) {
         document.getElementById('story').innerHTML = msg.story;
       }
 
-    }
+      if (msg.turn !== undefined) {
+        document.getElementById('turn').innerHTML = msg.turn == id ? 'Your Turn!' : 'Not Your Turn';
+      }
 
-    function submit() {
-      const id = parseInt(document.getElementById("submission").value);
-      if (!Number.isInteger(id)) return;
-      if (!words.map(x => x.id).includes(id)) return;
-      ws.send(JSON.stringify({ id: id }));
     }
 
   </script>

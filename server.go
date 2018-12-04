@@ -27,9 +27,9 @@ type Server struct {
 }
 
 type Player struct {
-	ID          int `json:"id"`
-	active      bool
-	messageChan chan []byte
+	ID     int `json:"id"`
+	active bool
+	conn   *websocket.Conn
 }
 
 type submission struct {
@@ -88,7 +88,6 @@ func (s *Server) newPlayer() *Player {
 		if !s.players[id].active {
 			s.players[id].active = true
 			s.players[id].ID = id
-			s.players[id].messageChan = make(chan []byte)
 			s.count++
 			return &s.players[id]
 		}
@@ -99,12 +98,14 @@ func (s *Server) newPlayer() *Player {
 func (s *Server) deletePlayer(p *Player) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
+	if !p.active {
+		return
+	}
 	p.active = false
-	p.messageChan = nil
+	s.count--
 }
 
 func (s *Server) homeHandler(w http.ResponseWriter, r *http.Request) {
-
 	// Serve index.html.
 	file, err := os.Open("index.html")
 	if err != nil {
@@ -112,13 +113,11 @@ func (s *Server) homeHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
-
 	if _, err := io.Copy(w, file); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		log.Println(err)
 		return
 	}
-
 }
 
 var upgrader = websocket.Upgrader{} // TODO Make not global.
@@ -134,32 +133,14 @@ func (s *Server) websocketHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	// Create a new Player.
+	// Create a new player.
 	p := s.newPlayer()
 	if p == nil {
 		fmt.Fprintf(w, "Sorry we're full.") // TODO Better error.
 		return
 	}
+	p.conn = conn
 	defer s.deletePlayer(p)
-
-	// Listen for messages that the game thread want us to send.
-	stop := make(chan struct{})
-	defer func() {
-		stop <- struct{}{}
-	}()
-	go func() {
-		for {
-			select {
-			case <-stop:
-				return
-			case msg := <-p.messageChan:
-				if err := conn.WriteMessage(websocket.TextMessage, msg); err != nil {
-					log.Println(err)
-					return
-				}
-			}
-		}
-	}()
 
 	// If a game isn't happening, start one.
 	s.mutex.Lock()
@@ -177,7 +158,7 @@ func (s *Server) websocketHandler(w http.ResponseWriter, r *http.Request) {
 		log.Println(err)
 		return
 	}
-	p.messageChan <- idBytes
+	p.conn.WriteMessage(websocket.TextMessage, idBytes)
 
 	// Listen for events.
 	for {
@@ -252,7 +233,7 @@ func (s *Server) startGame() {
 			if !p.active {
 				continue
 			}
-			p.messageChan <- updateBytes
+			p.conn.WriteMessage(websocket.TextMessage, updateBytes)
 		}
 
 		// Expect a response from the current player.
@@ -268,6 +249,7 @@ func (s *Server) startGame() {
 					break loop
 				}
 				s.story = s.story + s.words[sub.WordID].Word
+				break loop
 			case <-ticker.C:
 				break loop
 			}
