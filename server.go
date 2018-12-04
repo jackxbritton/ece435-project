@@ -3,7 +3,6 @@ package main
 import (
 	"bufio"
 	"encoding/json"
-	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -23,25 +22,20 @@ type Server struct {
 	story string
 
 	gameIsHappening bool
-	submissionChan  chan submission
+
+	submissionChan    chan submission
+	playerLeavingChan chan int
 }
 
 type Player struct {
-	ID     int `json:"id"`
-	active bool
-	conn   *websocket.Conn
+	ID          int `json:"id"`
+	active      bool
+	messageChan chan []byte
 }
 
 type submission struct {
 	playerID int
 	WordID   int `json:"id"`
-}
-
-type Update struct {
-	Players []Player `json:"players,omitempty"`
-	Words   []word   `json:"words,omitempty"`
-	Turn    int      `json:"turn"`
-	Story   string   `json:"story"`
 }
 
 type word struct {
@@ -53,7 +47,11 @@ func NewServer(cap int) (*Server, error) {
 
 	s := &Server{}
 	s.players = make([]Player, cap)
+	for i := range s.players {
+		s.players[i].messageChan = make(chan []byte)
+	}
 	s.submissionChan = make(chan submission)
+	s.playerLeavingChan = make(chan int)
 
 	// Load words from their file.
 	file, err := os.Open("words.txt")
@@ -95,16 +93,6 @@ func (s *Server) newPlayer() *Player {
 	return nil
 }
 
-func (s *Server) deletePlayer(p *Player) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-	if !p.active {
-		return
-	}
-	p.active = false
-	s.count--
-}
-
 func (s *Server) homeHandler(w http.ResponseWriter, r *http.Request) {
 	// Serve index.html.
 	file, err := os.Open("index.html")
@@ -136,11 +124,32 @@ func (s *Server) websocketHandler(w http.ResponseWriter, r *http.Request) {
 	// Create a new player.
 	p := s.newPlayer()
 	if p == nil {
-		fmt.Fprintf(w, "Sorry we're full.") // TODO Better error.
+		conn.WriteMessage(websocket.TextMessage, []byte("Sorry we're full.")) // TODO Better error.
 		return
 	}
-	p.conn = conn
-	defer s.deletePlayer(p)
+	defer func() {
+		s.playerLeavingChan <- p.ID
+	}()
+
+	// Launch thread to write messages.
+	stop := make(chan struct{})
+	defer func() {
+		stop <- struct{}{}
+	}()
+	go func() {
+		for {
+			select {
+			case <-stop:
+				return
+			case bytes := <-p.messageChan:
+				err := conn.WriteMessage(websocket.TextMessage, bytes)
+				if err != nil {
+					log.Println(err)
+					return
+				}
+			}
+		}
+	}()
 
 	// If a game isn't happening, start one.
 	s.mutex.Lock()
@@ -150,7 +159,7 @@ func (s *Server) websocketHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mutex.Unlock()
 
-	// Send the player their ID (and soon init data).
+	// Send the player their ID.
 	idBytes, err := json.Marshal(struct {
 		ID int `json:"id"`
 	}{ID: p.ID})
@@ -158,7 +167,26 @@ func (s *Server) websocketHandler(w http.ResponseWriter, r *http.Request) {
 		log.Println(err)
 		return
 	}
-	p.conn.WriteMessage(websocket.TextMessage, idBytes)
+	p.messageChan <- idBytes
+
+	// Broadcast the new player.
+	var activePlayers []Player
+	for _, player := range s.players {
+		if !player.active {
+			continue
+		}
+		activePlayers = append(activePlayers, player)
+	}
+	playerBytes, err := json.Marshal(struct {
+		Players []Player `json:"players"`
+	}{Players: activePlayers})
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	for _, player := range activePlayers {
+		player.messageChan <- playerBytes
+	}
 
 	// Listen for events.
 	for {
@@ -190,9 +218,8 @@ func (s *Server) startGame() {
 
 	for {
 
-		s.mutex.Lock()
-
 		// Kill the game if everyone left.
+		s.mutex.Lock()
 		if s.count == 0 {
 			s.gameIsHappening = false
 			s.mutex.Unlock()
@@ -200,7 +227,7 @@ func (s *Server) startGame() {
 		}
 		s.mutex.Unlock()
 
-		// TODO Advance the turn so long as the current player is inactive.
+		// Advance the turn until it falls on a player who's active.
 		for {
 			if s.players[turn].active {
 				break
@@ -208,21 +235,15 @@ func (s *Server) startGame() {
 			turn = (turn + 1) % len(s.players)
 		}
 
-		// Get an array of the active players.
-		var activePlayers []Player
-		for _, p := range s.players {
-			if !p.active {
-				continue
-			}
-			activePlayers = append(activePlayers, p)
-		}
-
 		// Broadcast an update.
-		update := Update{
-			Players: activePlayers,
-			Words:   s.words,
-			Turn:    turn,
-			Story:   s.story,
+		update := struct {
+			Words []word `json:"words,omitempty"`
+			Turn  int    `json:"turn"`
+			Story string `json:"story"`
+		}{
+			Words: s.words,
+			Turn:  turn,
+			Story: s.story,
 		}
 		updateBytes, err := json.Marshal(update)
 		if err != nil {
@@ -233,7 +254,7 @@ func (s *Server) startGame() {
 			if !p.active {
 				continue
 			}
-			p.conn.WriteMessage(websocket.TextMessage, updateBytes)
+			p.messageChan <- updateBytes
 		}
 
 		// Expect a response from the current player.
@@ -242,6 +263,15 @@ func (s *Server) startGame() {
 	loop:
 		for {
 			select {
+			case id := <-s.playerLeavingChan:
+				if id < 0 || id >= len(s.players) {
+					continue
+				}
+				s.players[id].active = false
+				s.count--
+				if turn == id {
+					break loop
+				}
 			case sub := <-s.submissionChan:
 				if sub.playerID != turn {
 					continue

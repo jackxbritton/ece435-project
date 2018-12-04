@@ -3,10 +3,12 @@
 <head>
   <title>whatever</title>
   <style>
-    .word {
+    .word, .player {
       display: inline;
-      padding: 2em;
-      margin: 1em;
+      padding-right: 1em;
+    }
+    .active-player {
+      color: red;
     }
   </style>
 </head>
@@ -14,14 +16,15 @@
 <body>
 
   <p id="story"></p>
-
   <div id="words"></div>
-
-  <p id="turn"></p>
+  <div id="players"></div>
+  <p id="countdown"></p>
 
   <script type="text/javascript">
 
     let id;
+    let turn;
+    let players = [];
     let timers = [];
 
     let ws = new WebSocket('ws://localhost:8080/status');
@@ -57,6 +60,7 @@
       }
 
       if (msg.turn !== undefined) {
+        turn = msg.turn;
         // Clear existing timers.
         timers.forEach(x => clearTimeout(x));
         if (msg.turn == id) {
@@ -64,12 +68,33 @@
           let zero_to_nine = [...Array(10).keys()];
           timers = zero_to_nine.map(x => {
             return setTimeout(() => {
-              document.getElementById('turn').innerHTML = `Your Turn! ${10-x}`
+              document.getElementById('countdown').innerHTML = `${10-x}`
             }, x*1000);
           });
         } else {
-          document.getElementById('turn').innerHTML = `Player ${msg.turn}'s Turn`;
+          document.getElementById('countdown').innerHTML = '';
         }
+        updatePlayersHTML(players, turn);
+      }
+
+      if (msg.players !== undefined) {
+        players = msg.players;
+        updatePlayersHTML(players, turn);
+      }
+
+      function updatePlayersHTML(players, turn) {
+        let playersDiv = document.getElementById('players');
+        // Wipe its children.
+        while (playersDiv.firstChild) playersDiv.removeChild(playersDiv.firstChild);
+        // Append each of the words.
+        players.forEach(player => {
+          let node = document.createElement('DIV');
+          let text = document.createTextNode(`Player ${player.id}`);
+          node.appendChild(text);
+          node.className = 'player';
+          if (player.id == turn) node.className += ' active-player';
+          playersDiv.appendChild(node);
+        });
       }
 
     }
