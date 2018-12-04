@@ -237,7 +237,8 @@ func (s *Server) startGame() {
 		}
 
 		// Expect a response from the current player.
-		ticker := time.NewTicker(5 * time.Second)
+		// TODO Also handle new players here.
+		ticker := time.NewTicker(10 * time.Second)
 	loop:
 		for {
 			select {
@@ -248,7 +249,7 @@ func (s *Server) startGame() {
 				if sub.WordID < 0 || sub.WordID >= len(s.words) {
 					break loop
 				}
-				s.story = s.story + s.words[sub.WordID].Word
+				s.story = s.story + " " + s.words[sub.WordID].Word
 				break loop
 			case <-ticker.C:
 				break loop

@@ -2,13 +2,19 @@
 
 <head>
   <title>whatever</title>
+  <style>
+    .word {
+      display: inline;
+      padding: 2em;
+      margin: 1em;
+    }
+  </style>
 </head>
 
 <body>
 
   <p id="story"></p>
 
-  <h3>words</h3>
   <div id="words"></div>
 
   <p id="turn"></p>
@@ -16,6 +22,7 @@
   <script type="text/javascript">
 
     let id;
+    let timers = [];
 
     let ws = new WebSocket('ws://localhost:8080/status');
     ws.onerror = e => console.log(e);
@@ -36,10 +43,11 @@
         while (wordsDiv.firstChild) wordsDiv.removeChild(wordsDiv.firstChild);
         // Append each of the words.
         msg.words.forEach(word => {
-          let node = document.createElement('P');
+          let node = document.createElement('DIV');
           let text = document.createTextNode(word.word);
           node.appendChild(text);
           node.onclick = () => ws.send(JSON.stringify({ id: word.id }));
+          node.className = 'word';
           wordsDiv.appendChild(node);
         });
       }
@@ -49,7 +57,19 @@
       }
 
       if (msg.turn !== undefined) {
-        document.getElementById('turn').innerHTML = msg.turn == id ? 'Your Turn!' : 'Not Your Turn';
+        // Clear existing timers.
+        timers.forEach(x => clearTimeout(x));
+        if (msg.turn == id) {
+          // Generate timers for the countdown.
+          let zero_to_nine = [...Array(10).keys()];
+          timers = zero_to_nine.map(x => {
+            return setTimeout(() => {
+              document.getElementById('turn').innerHTML = `Your Turn! ${10-x}`
+            }, x*1000);
+          });
+        } else {
+          document.getElementById('turn').innerHTML = `Player ${msg.turn}'s Turn`;
+        }
       }
 
     }
