@@ -24,6 +24,7 @@ type Server struct {
 	gameIsHappening bool
 
 	submissionChan    chan submission
+	playerJoiningChan chan int
 	playerLeavingChan chan int
 }
 
@@ -51,6 +52,7 @@ func NewServer(cap int) (*Server, error) {
 		s.players[i].messageChan = make(chan []byte)
 	}
 	s.submissionChan = make(chan submission)
+	s.playerJoiningChan = make(chan int)
 	s.playerLeavingChan = make(chan int)
 
 	// Load words from their file.
@@ -159,6 +161,10 @@ func (s *Server) websocketHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mutex.Unlock()
 
+	// Notify game thread that player joined
+	// (this must happen in this order).
+	s.playerJoiningChan <- p.ID
+
 	// Send the player their ID.
 	idBytes, err := json.Marshal(struct {
 		ID int `json:"id"`
@@ -263,6 +269,11 @@ func (s *Server) startGame() {
 	loop:
 		for {
 			select {
+			case id := <-s.playerJoiningChan:
+				if id < 0 || id >= len(s.players) {
+					continue
+				}
+				s.players[id].messageChan <- updateBytes
 			case id := <-s.playerLeavingChan:
 				if id < 0 || id >= len(s.players) {
 					continue
