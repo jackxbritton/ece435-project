@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -18,8 +21,9 @@ type Server struct {
 	players []Player
 	count   int
 
-	words []word
-	story string
+	words     []string
+	wordCount int
+	story     string
 
 	gameIsHappening bool
 
@@ -37,11 +41,6 @@ type Player struct {
 type submission struct {
 	playerID int
 	WordID   int `json:"id"`
-}
-
-type word struct {
-	ID   int    `json:"id"`
-	Word string `json:"word"`
 }
 
 func NewServer(cap int) (*Server, error) {
@@ -62,15 +61,29 @@ func NewServer(cap int) (*Server, error) {
 	}
 	defer file.Close()
 	scanner := bufio.NewScanner(file)
-	id := 0
 	for scanner.Scan() {
-		w := word{
-			ID:   id,
-			Word: string(scanner.Bytes()),
+		// First string is a number.
+		strs := strings.Split(scanner.Text(), " ")
+		count, err := strconv.Atoi(strs[0])
+		if err != nil {
+			log.Println(err)
+			continue
 		}
-		s.words = append(s.words, w)
-		id++
+		if len(strs) < 2 {
+			log.Println("bad line in words.txt!")
+			continue
+		}
+		// Add <count> of the string to the words.
+		word := strings.Join(strs[1:], " ")
+		for i := 0; i < count; i++ {
+			s.words = append(s.words, word)
+		}
 	}
+
+	// Shuffle the words.
+	rand.Shuffle(len(s.words), func(i, j int) {
+		s.words[i], s.words[j] = s.words[j], s.words[i]
+	})
 
 	return s, nil
 }
@@ -110,7 +123,12 @@ func (s *Server) homeHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-var upgrader = websocket.Upgrader{} // TODO Make not global.
+// TODO Make not global.
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
+}
 
 func (s *Server) websocketHandler(w http.ResponseWriter, r *http.Request) {
 
@@ -126,7 +144,7 @@ func (s *Server) websocketHandler(w http.ResponseWriter, r *http.Request) {
 	// Create a new player.
 	p := s.newPlayer()
 	if p == nil {
-		conn.WriteMessage(websocket.TextMessage, []byte("Sorry we're full.")) // TODO Better error.
+		conn.WriteMessage(websocket.TextMessage, []byte("Sorry we're full."))
 		return
 	}
 	defer func() {
@@ -175,7 +193,40 @@ func (s *Server) websocketHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	p.messageChan <- idBytes
 
-	// Broadcast the new player.
+	s.broadcastPlayers()
+
+	// Listen for events.
+	for {
+
+		// Wait for a message.
+		_, bytes, err := conn.ReadMessage()
+		if err != nil {
+			if _, ok := err.(*websocket.CloseError); !ok {
+				log.Println(err)
+			}
+			return
+		}
+
+		// Serialize into a submission and push to the channel.
+		var sub submission
+		if err := json.Unmarshal(bytes, &sub); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			log.Println(err)
+			return
+		}
+		sub.playerID = p.ID
+		s.submissionChan <- sub
+
+	}
+
+}
+
+func (s *Server) broadcastPlayers() {
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	// Assemble array of active players.
 	var activePlayers []Player
 	for _, player := range s.players {
 		if !player.active {
@@ -192,28 +243,6 @@ func (s *Server) websocketHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	for _, player := range activePlayers {
 		player.messageChan <- playerBytes
-	}
-
-	// Listen for events.
-	for {
-
-		// Wait for a message.
-		_, bytes, err := conn.ReadMessage()
-		if err != nil {
-			log.Println(err) // TODO Handle disconnect error separately.
-			return
-		}
-
-		// Serialize into a submission and push to the channel.
-		var sub submission
-		if err := json.Unmarshal(bytes, &sub); err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			log.Println(err)
-			return
-		}
-		sub.playerID = p.ID
-		s.submissionChan <- sub
-
 	}
 
 }
@@ -241,13 +270,28 @@ func (s *Server) startGame() {
 			turn = (turn + 1) % len(s.players)
 		}
 
+		// Select new words.
+		type word struct {
+			ID   int    `json:"id"`
+			Word string `json:"word"`
+		}
+		var words []word
+		wordsPerTurn := 10
+		for i := 0; i < wordsPerTurn; i++ {
+			words = append(words, word{
+				ID:   i,
+				Word: s.words[s.wordCount],
+			})
+			s.wordCount = (s.wordCount + 1) % len(s.words)
+		}
+
 		// Broadcast an update.
 		update := struct {
 			Words []word `json:"words,omitempty"`
 			Turn  int    `json:"turn"`
 			Story string `json:"story"`
 		}{
-			Words: s.words,
+			Words: words,
 			Turn:  turn,
 			Story: s.story,
 		}
@@ -264,7 +308,6 @@ func (s *Server) startGame() {
 		}
 
 		// Expect a response from the current player.
-		// TODO Also handle new players here.
 		ticker := time.NewTicker(10 * time.Second)
 	loop:
 		for {
@@ -278,19 +321,29 @@ func (s *Server) startGame() {
 				if id < 0 || id >= len(s.players) {
 					continue
 				}
+
+				// Remove the old player.
+				s.mutex.Lock()
 				s.players[id].active = false
 				s.count--
+				s.mutex.Unlock()
+
+				// Broadcast current active players.
+				s.broadcastPlayers()
+
+				// If the current player just left, skip to the next turn.
 				if turn == id {
 					break loop
 				}
+
 			case sub := <-s.submissionChan:
 				if sub.playerID != turn {
 					continue
 				}
-				if sub.WordID < 0 || sub.WordID >= len(s.words) {
+				if sub.WordID < 0 || sub.WordID >= wordsPerTurn {
 					break loop
 				}
-				s.story = s.story + " " + s.words[sub.WordID].Word
+				s.story = s.story + " " + words[sub.WordID].Word
 				break loop
 			case <-ticker.C:
 				break loop
@@ -298,7 +351,5 @@ func (s *Server) startGame() {
 		}
 
 		turn = (turn + 1) % len(s.players)
-
 	}
-
 }

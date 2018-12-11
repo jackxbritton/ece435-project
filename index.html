@@ -27,7 +27,7 @@
     let players = [];
     let timers = [];
 
-    let ws = new WebSocket('ws://localhost:8080/status');
+    let ws = new WebSocket('ws://141.114.202.109:8080/status');
     ws.onerror = e => console.log(e);
     ws.onopen = () => console.log('open');
     ws.onclose = () => console.log('close');
@@ -56,7 +56,8 @@
       }
 
       if (msg.story !== undefined) {
-        document.getElementById('story').innerHTML = msg.story;
+        let text = msg.story === '' ? 'CHOOSE A WORD' : msg.story;
+        document.getElementById('story').innerHTML = text;
       }
 
       if (msg.turn !== undefined) {
