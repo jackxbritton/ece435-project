@@ -27,9 +27,10 @@ type Server struct {
 
 	gameIsHappening bool
 
-	submissionChan    chan submission
+	responseChan      chan response
 	playerJoiningChan chan int
 	playerLeavingChan chan int
+	resetChan         chan struct{}
 }
 
 type Player struct {
@@ -38,9 +39,10 @@ type Player struct {
 	messageChan chan []byte
 }
 
-type submission struct {
+type response struct {
 	playerID int
-	WordID   int `json:"id"`
+	WordID   int  `json:"id"`
+	Reset    bool `json:"reset,omitempty"`
 }
 
 func NewServer(cap int) (*Server, error) {
@@ -50,9 +52,10 @@ func NewServer(cap int) (*Server, error) {
 	for i := range s.players {
 		s.players[i].messageChan = make(chan []byte)
 	}
-	s.submissionChan = make(chan submission)
+	s.responseChan = make(chan response)
 	s.playerJoiningChan = make(chan int)
 	s.playerLeavingChan = make(chan int)
+	s.resetChan = make(chan struct{})
 
 	// Load words from their file.
 	file, err := os.Open("words.txt")
@@ -207,15 +210,15 @@ func (s *Server) websocketHandler(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Serialize into a submission and push to the channel.
-		var sub submission
-		if err := json.Unmarshal(bytes, &sub); err != nil {
+		// Serialize into a response and push to the channel.
+		var res response
+		if err := json.Unmarshal(bytes, &res); err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			log.Println(err)
 			return
 		}
-		sub.playerID = p.ID
-		s.submissionChan <- sub
+		res.playerID = p.ID
+		s.responseChan <- res
 
 	}
 
@@ -336,14 +339,19 @@ func (s *Server) startGame() {
 					break loop
 				}
 
-			case sub := <-s.submissionChan:
-				if sub.playerID != turn {
-					continue
-				}
-				if sub.WordID < 0 || sub.WordID >= wordsPerTurn {
+			case res := <-s.responseChan:
+				if res.Reset {
+					s.story = ""
+					turn = 0
 					break loop
 				}
-				s.story = s.story + " " + words[sub.WordID].Word
+				if res.playerID != turn {
+					continue
+				}
+				if res.WordID < 0 || res.WordID >= wordsPerTurn {
+					break loop
+				}
+				s.story = s.story + " " + words[res.WordID].Word
 				break loop
 			case <-ticker.C:
 				break loop

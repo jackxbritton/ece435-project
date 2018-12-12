@@ -19,6 +19,7 @@
   <div id="words"></div>
   <div id="players"></div>
   <p id="countdown"></p>
+  <button type="button" onclick="reset()">Reset</button>
 
   <script type="text/javascript">
 
@@ -94,6 +95,10 @@
         });
       }
 
+    }
+
+    function reset() {
+      ws.send(JSON.stringify({ reset: true }));
     }
 
   </script>
