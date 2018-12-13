@@ -109,9 +109,8 @@ func NewServer(cap int) (*Server, error) {
 		defer file.Close()
 
 		// Set header and copy.
-		w.Header().Set("Content-Type", "audio/mp3")
+		w.Header().Set("Content-Type", "audio/mpeg")
 		if _, err = io.Copy(w, file); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
 			log.Println(err)
 			return
 		}
