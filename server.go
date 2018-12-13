@@ -109,7 +109,7 @@ func NewServer(cap int) (*Server, error) {
 		defer file.Close()
 
 		// Set header and copy.
-		w.Header().Set("Content-Type", "audio/mp4")
+		w.Header().Set("Content-Type", "audio/mp3")
 		if _, err = io.Copy(w, file); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			log.Println(err)
@@ -123,7 +123,7 @@ func NewServer(cap int) (*Server, error) {
 
 func (s *Server) Start() error {
 	http.Handle("/", s.router)
-	return http.ListenAndServe(":8080", nil)
+	return http.ListenAndServe(":80", nil)
 }
 
 func (s *Server) newPlayer() *Player {

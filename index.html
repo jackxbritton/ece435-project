@@ -24,18 +24,24 @@
   <script type="text/javascript">
 
     // Load wav files.
-    let welcome = new Audio('audio/welcome.m4a');
+    let welcome = new Audio('audio/welcome.mp3');
     welcome.play();
-    let its_your_turn = new Audio('audio/its-your-turn.m4a');
-    let cool_word = new Audio('audio/cool-word.m4a');
-    let reset = new Audio('audio/reset.m4a');
+    let its_your_turn = new Audio('audio/its-your-turn.mp3');
+    let cool_word = new Audio('audio/cool-word.mp3');
+    let reset = new Audio('audio/reset.mp3');
+	let elevator_music = new Audio('audio/elevator-music.mp3');
+	elevator_music.addEventListener('ended', () => {
+		this.currentTime = 0;
+		this.play();
+	}, false);
+	elevator_music.play();
 
     let id;
     let turn;
     let players = [];
     let timers = [];
 
-    let ws = new WebSocket('ws://141.114.202.109:8080/status');
+    let ws = new WebSocket('ws://141.114.206.158/status');
     ws.onerror = e => console.log(e);
     ws.onopen = () => console.log('open');
     ws.onclose = () => console.log('close');
