@@ -19,9 +19,16 @@
   <div id="words"></div>
   <div id="players"></div>
   <p id="countdown"></p>
-  <button type="button" onclick="reset()">Reset</button>
+  <button type="button" onclick="resetCallback()">Reset</button>
 
   <script type="text/javascript">
+
+    // Load wav files.
+    let welcome = new Audio('audio/welcome.m4a');
+    welcome.play();
+    let its_your_turn = new Audio('audio/its-your-turn.m4a');
+    let cool_word = new Audio('audio/cool-word.m4a');
+    let reset = new Audio('audio/reset.m4a');
 
     let id;
     let turn;
@@ -50,7 +57,10 @@
           let node = document.createElement('DIV');
           let text = document.createTextNode(word.word);
           node.appendChild(text);
-          node.onclick = () => ws.send(JSON.stringify({ id: word.id }));
+          node.onclick = () => {
+            if (Math.random() < 0.33) cool_word.play();
+            ws.send(JSON.stringify({ id: word.id }));
+          };
           node.className = 'word';
           wordsDiv.appendChild(node);
         });
@@ -73,6 +83,9 @@
           }, x*1000);
         });
         updatePlayersHTML(players, turn);
+        if (turn == id) {
+          if (Math.random() < 0.25) its_your_turn.play();
+        }
       }
 
       if (msg.players !== undefined) {
@@ -97,7 +110,8 @@
 
     }
 
-    function reset() {
+    function resetCallback() {
+      reset.play();
       ws.send(JSON.stringify({ reset: true }));
     }
 

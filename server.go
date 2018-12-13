@@ -13,10 +13,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 )
 
 type Server struct {
+	router *mux.Router
+
 	mutex   sync.Mutex
 	players []Player
 	count   int
@@ -88,12 +91,38 @@ func NewServer(cap int) (*Server, error) {
 		s.words[i], s.words[j] = s.words[j], s.words[i]
 	})
 
+	s.router = mux.NewRouter()
+	s.router.HandleFunc("/", s.homeHandler)
+	s.router.HandleFunc("/status", s.websocketHandler)
+	s.router.HandleFunc("/audio/{filename}", func(w http.ResponseWriter, r *http.Request) {
+
+		vars := mux.Vars(r)
+		filename := vars["filename"]
+
+		// Open the audio file.
+		file, err := os.Open(filename)
+		if err != nil {
+			w.WriteHeader(http.StatusNotFound)
+			log.Println(err)
+			return
+		}
+		defer file.Close()
+
+		// Set header and copy.
+		w.Header().Set("Content-Type", "audio/mp4")
+		if _, err = io.Copy(w, file); err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+			log.Println(err)
+			return
+		}
+
+	})
+
 	return s, nil
 }
 
 func (s *Server) Start() error {
-	http.HandleFunc("/", s.homeHandler)
-	http.HandleFunc("/status", s.websocketHandler)
+	http.Handle("/", s.router)
 	return http.ListenAndServe(":8080", nil)
 }
 

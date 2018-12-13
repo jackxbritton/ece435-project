@@ -5,7 +5,7 @@ import (
 )
 
 func main() {
-	s, err := NewServer(4)
+	s, err := NewServer(32)
 	if err != nil {
 		log.Println(err)
 		return
